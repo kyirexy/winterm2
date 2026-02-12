@@ -72,6 +72,12 @@ wt2 config load ~/.wt2rc.yaml
 | `wt2 window close [id]` | Close a window |
 | `wt2 window focus <id>` | Focus a window |
 | `wt2 window list` | List all windows |
+| `wt2 window move <x> <y>` | Move window to position |
+| `wt2 window resize <w> <h>` | Resize window |
+| `wt2 window fullscreen [on|off|toggle]` | Toggle fullscreen |
+| `wt2 window arrange save <name>` | Save window arrangement |
+| `wt2 window arrange restore <name>` | Restore window arrangement |
+| `wt2 window arrange list` | List saved arrangements |
 
 #### Tab Commands
 
@@ -80,9 +86,13 @@ wt2 config load ~/.wt2rc.yaml
 | `wt2 tab new` | Create a new tab |
 | `wt2 tab close [id]` | Close a tab |
 | `wt2 tab focus <id>` | Focus a tab |
+| `wt2 tab select <id\|index>` | Select tab by ID or index |
 | `wt2 tab list` | List all tabs |
 | `wt2 tab next` | Switch to next tab |
 | `wt2 tab prev` | Switch to previous tab |
+| `wt2 tab goto <index>` | Go to tab by index |
+| `wt2 tab rename <title>` | Rename tab |
+| `wt2 tab move` | Move tab to new window |
 
 #### Pane Commands
 
@@ -95,6 +105,24 @@ wt2 config load ~/.wt2rc.yaml
 | `wt2 pane resize <direction> [delta]` | Resize pane |
 | `wt2 pane list` | List all panes |
 | `wt2 pane zoom` | Toggle pane zoom |
+| `wt2 pane swap <id1> <id2>` | Swap two panes |
+| `wt2 pane split2x2` | Create 2x2 pane grid |
+
+#### Session Commands
+
+| Command | Description |
+|---------|-------------|
+| `wt2 session send <cmd>` | Send command to pane |
+| `wt2 session run <cmd>` | Run command in new pane |
+| `wt2 session clear` | Clear pane output |
+| `wt2 session list` | List all sessions |
+| `wt2 session restart` | Restart session |
+| `wt2 session focus <id>` | Focus specific pane |
+| `wt2 session read [lines]` | Read screen contents |
+| `wt2 session capture -o <file>` | Capture screen to file |
+| `wt2 session set-name <name>` | Set session name |
+| `wt2 session get-var <var>` | Get session variable |
+| `wt2 session set-var <var> <value>` | Set session variable |
 
 #### Session Commands
 
@@ -133,6 +161,24 @@ wt2 config load ~/.wt2rc.yaml
 | `wt2 config set <key> <value>` | Set config value |
 | `wt2 config init` | Initialize config |
 | `wt2 config edit` | Edit config file |
+| `wt2 config reload` | Reload configuration |
+| `wt2 config alias [name]` | Execute or list aliases |
+| `wt2 config profile list` | List profiles |
+| `wt2 config profile show <name>` | Show profile details |
+| `wt2 config profile apply <name>` | Apply a profile |
+
+#### Shortcuts
+
+| Shortcut | Original Command |
+|----------|-----------------|
+| `wt2 send "cmd"` | `wt2 session send "cmd"` |
+| `wt2 run "cmd"` | `wt2 session run "cmd"` |
+| `wt2 split` | `wt2 pane split` |
+| `wt2 vsplit` | `wt2 pane vsplit` |
+| `wt2 clear` | `wt2 session clear` |
+| `wt2 ls` | `wt2 session list` |
+| `wt2 new` | `wt2 window new` |
+| `wt2 newtab` | `wt2 tab new` |
 
 ### Configuration File
 
@@ -311,6 +357,12 @@ wt2 config load ~/.wt2rc.yaml
 | `wt2 window close [id]` | 关闭窗口 |
 | `wt2 window focus <id>` | 聚焦窗口 |
 | `wt2 window list` | 列出所有窗口 |
+| `wt2 window move <x> <y>` | 移动窗口位置 |
+| `wt2 window resize <w> <h>` | 调整窗口大小 |
+| `wt2 window fullscreen [on\|off\|toggle]` | 切换全屏模式 |
+| `wt2 window arrange save <name>` | 保存窗口布局 |
+| `wt2 window arrange restore <name>` | 恢复窗口布局 |
+| `wt2 window arrange list` | 列出已保存布局 |
 
 #### 标签页命令
 
@@ -319,9 +371,13 @@ wt2 config load ~/.wt2rc.yaml
 | `wt2 tab new` | 创建新标签页 |
 | `wt2 tab close [id]` | 关闭标签页 |
 | `wt2 tab focus <id>` | 聚焦标签页 |
+| `wt2 tab select <id\|index>` | 按 ID 或索引选择标签页 |
 | `wt2 tab list` | 列出所有标签页 |
 | `wt2 tab next` | 切换到下一个标签页 |
 | `wt2 tab prev` | 切换到上一个标签页 |
+| `wt2 tab goto <index>` | 跳转到指定索引的标签页 |
+| `wt2 tab rename <title>` | 重命名标签页 |
+| `wt2 tab move` | 将标签页移动到新窗口 |
 
 #### 窗格命令
 
@@ -334,6 +390,8 @@ wt2 config load ~/.wt2rc.yaml
 | `wt2 pane resize <方向> [增量]` | 调整窗格大小 |
 | `wt2 pane list` | 列出所有窗格 |
 | `wt2 pane zoom` | 切换窗格缩放 |
+| `wt2 pane swap <id1> <id2>` | 交换两个窗格 |
+| `wt2 pane split2x2` | 创建 2x2 窗格网格 |
 
 #### 会话命令
 
@@ -343,6 +401,13 @@ wt2 config load ~/.wt2rc.yaml
 | `wt2 session run <命令>` | 在新窗格中运行命令 |
 | `wt2 session clear` | 清除窗格输出 |
 | `wt2 session list` | 列出所有会话 |
+| `wt2 session restart` | 重启会话 |
+| `wt2 session focus <id>` | 聚焦指定窗格 |
+| `wt2 session read [行数]` | 读取屏幕内容 |
+| `wt2 session capture -o <文件>` | 捕获屏幕到文件 |
+| `wt2 session set-name <名称>` | 设置会话名称 |
+| `wt2 session get-var <变量>` | 获取会话变量 |
+| `wt2 session set-var <变量> <值>` | 设置会话变量 |
 
 #### 广播命令
 
@@ -372,6 +437,24 @@ wt2 config load ~/.wt2rc.yaml
 | `wt2 config set <键> <值>` | 设置配置值 |
 | `wt2 config init` | 初始化配置 |
 | `wt2 config edit` | 编辑配置文件 |
+| `wt2 config reload` | 重新加载配置 |
+| `wt2 config alias [名称]` | 执行或列出别名 |
+| `wt2 config profile list` | 列出所有配置方案 |
+| `wt2 config profile show <名称>` | 显示配置方案详情 |
+| `wt2 config profile apply <名称>` | 应用配置方案 |
+
+#### 快捷命令
+
+| 快捷命令 | 原始命令 |
+|----------|----------|
+| `wt2 send "命令"` | `wt2 session send "命令"` |
+| `wt2 run "命令"` | `wt2 session run "命令"` |
+| `wt2 split` | `wt2 pane split` |
+| `wt2 vsplit` | `wt2 pane vsplit` |
+| `wt2 clear` | `wt2 session clear` |
+| `wt2 ls` | `wt2 session list` |
+| `wt2 new` | `wt2 window new` |
+| `wt2 newtab` | `wt2 tab new` |
 
 ### 配置文件
 
