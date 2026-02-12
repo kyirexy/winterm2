@@ -1,0 +1,92 @@
+# winterm2 configuration file example
+# This file demonstrates all available configuration options for winterm2
+
+version: "1.0"
+
+# Default profile settings applied globally
+defaults:
+  shell: "PowerShell"
+  startup_dir: "C:\\Users\\%USERNAME%"
+
+profiles:
+  dev:
+    description: "Development environment"
+    default_shell: "PowerShell"
+    window:
+      profile: "PowerShell"
+      size: [120, 40]
+      startup_dir: "C:\\Users\\%USERNAME%\\Projects"
+    tabs:
+      - name: "Server"
+        profile: "Ubuntu"
+        startup_dir: "/home/user/project"
+        commands:
+          - "cd /home/user/project"
+          - "npm run dev"
+      - name: "Database"
+        profile: "Ubuntu"
+        commands:
+          - "docker exec -it postgres psql -U user -d mydb"
+      - name: "API"
+        profile: "PowerShell"
+        commands:
+          - "cd C:\\Users\\%USERNAME%\\Projects\\api"
+          - ".\\venv\\Scripts\\Activate.ps1"
+          - "uvicorn main:app --reload"
+
+  data:
+    description: "Data science environment"
+    default_shell: "PowerShell"
+    tabs:
+      - name: "Jupyter"
+        profile: "Python"
+        commands:
+          - "cd C:\\Users\\%USERNAME%\\Projects\\data-science"
+          - "jupyter notebook"
+      - name: "SQL"
+        profile: "SQL Server"
+        commands:
+          - "sqlcmd -S localhost -d mydb"
+
+  wsl-dev:
+    description: "WSL development environment"
+    default_shell: "Ubuntu"
+    tabs:
+      - name: "Main"
+        profile: "Ubuntu"
+        commands:
+          - "cd ~/projects"
+          - "git pull"
+      - name: "Docker"
+        profile: "Ubuntu"
+        commands:
+          - "docker ps -a"
+
+workflows:
+  daily:
+    description: "Daily development setup"
+    steps:
+      - load_profile: "dev"
+      - run_command: "echo 'Good morning! Ready to code.'"
+      - focus_tab: "Server"
+
+  deploy:
+    description: "Deployment workflow"
+    steps:
+      - load_profile: "dev"
+      - run_command: "echo 'Building project...'"
+      - run_command: "npm run build"
+      - run_command: "echo 'Deployment complete!'"
+
+  wsl-setup:
+    description: "Quick WSL setup"
+    steps:
+      - load_profile: "wsl-dev"
+      - focus_tab: "Main"
+
+# Theme customization (Windows Terminal settings)
+theme:
+  color_scheme: "Campbell"
+  font:
+    face: "Cascadia Code"
+    size: 12

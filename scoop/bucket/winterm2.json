@@ -1,0 +1,25 @@
+{
+    "version": "0.1.0",
+    "description": "Windows-native CLI tool for automating Windows Terminal",
+    "homepage": "https://github.com/yourusername/winterm2",
+    "license": "MIT",
+    "url": "https://files.pythonhosted.org/packages/$(Split-Part $Filename '_' 2)/winterm2-0.1.0-py3-none-any.whl",
+    "hash": "",
+    "pre_install": "python -m ensurepip",
+    "install": [
+        "python -m pip install --no-deps --ignore-installed -r $dir\\requirements.txt",
+        "python -m pip install $dir\\winterm2-0.1.0-py3-none-any.whl"
+    ],
+    "bin": "Scripts\\wt2.exe",
+    "checkver": {
+        "url": "https://pypi.org/pypi/winterm2/json",
+        "jsonpath": "$.info.version"
+    },
+    "autoupdate": {
+        "url": "https://files.pythonhosted.org/packages/$(Split-Part $Filename '_' 2)/winterm2-$version-py3-none-any.whl",
+        "hash": {
+            "url": "https://pypi.org/pypi/winterm2/json",
+            "jsonpath": "$.urls[?(@.filename == 'winterm2-$version-py3-none-any.whl')].digests.sha256"
+        }
+    }
+}
