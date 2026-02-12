@@ -280,6 +280,57 @@ black src/wt2/
 4. Add tests (80%+ coverage required)
 5. Submit pull request
 
+### Claude Teams Integration
+
+winterm2 can be integrated with [Claude Code Teams](https://code.claude.com/docs/zh-CN/agent-teams) to enable multi-agent collaboration on terminal automation tasks.
+
+#### What is Claude Teams?
+
+Claude Teams allows multiple AI agents to work together on a project, with each agent having specialized roles. This is ideal for complex terminal automation workflows where different aspects need focused attention.
+
+#### When to Use Claude Teams
+
+- **Complex automation tasks**: Break down into specialized agents (e.g., one for window management, one for scripting, one for monitoring)
+- **Parallel execution**: Run multiple terminal operations simultaneously
+- **Collaborative debugging**: One agent investigates issues while another implements fixes
+
+#### Integration with winterm2
+
+```powershell
+# In your Claude Code project, create a team configuration
+# See: https://code.claude.com/docs/zh-CN/agent-teams#when-to-use-agent-teams
+
+# Example: Use winterm2 commands in team workflows
+wt2 window new --profile PowerShell
+wt2 split --direction vertical
+wt2 broadcast send "git status" --all
+```
+
+#### Team Setup Example
+
+```json
+// .claude/teams/winterm2-automation.json
+{
+  "team_name": "winterm2-automation",
+  "members": [
+    {
+      "name": "window-manager",
+      "role": "Create and manage terminal windows and tabs",
+      "commands": ["wt2 window new", "wt2 tab new", "wt2 pane split"]
+    },
+    {
+      "name": "session-operator",
+      "role": "Send commands and manage sessions",
+      "commands": ["wt2 session send", "wt2 session run", "wt2 broadcast"]
+    }
+  ]
+}
+```
+
+For detailed documentation on setting up Claude Teams, visit:
+- [Claude Teams Documentation](https://code.claude.com/docs/zh-CN/agent-teams)
+- [Team Configuration Guide](https://code.claude.com/docs/zh-CN/agent-teams#when-to-use-agent-teams)
+
 ### License
 
 MIT License - see LICENSE file for details.
@@ -509,11 +560,14 @@ D:\Projects → /mnt/d/Projects
 ### 系统要求
 
 - Windows 10 21H2+ 或 Windows 11
-- Windows Terminal 1.15+（需要启用实验性 JSON API）
+- Windows Terminal 1.15+
 - Python 3.10+
+- **无需启用任何 API 设置**（与 iTerm2 不同）
 - 不需要管理员权限（窗口移动/调整大小除外）
 
-### 启用实验性 API
+> **注意**：winterm2 使用 Windows Terminal 自带的 `wt.exe` 命令行工具，无需像 iTerm2 那样在设置中启用 Python API。如需高级功能（列出窗口/标签页、读取屏幕内容），可选择性启用"实验性 JSON 命令 API"。
+
+### 启用实验性 API（可选，用于高级功能）
 
 1. 打开 Windows Terminal 设置（Ctrl+,）
 2. 进入开发者（Developers）部分
@@ -547,6 +601,54 @@ pip install ruff black
 ruff check src/wt2/
 black src/wt2/
 ```
+
+### Claude Teams 集成
+
+winterm2 可以与 [Claude Code Teams](https://code.claude.com/docs/zh-CN/agent-teams) 集成，实现多代理协作完成终端自动化任务。
+
+#### 什么是 Claude Teams？
+
+Claude Teams 允许多个 AI 代理共同协作完成项目，每个代理可以扮演专门的角色。这非常适合复杂的终端自动化工作流。
+
+#### 何时使用 Claude Teams
+
+- **复杂自动化任务**：分解为专业化的代理（例如：一个负责窗口管理，一个负责脚本编写，一个负责监控）
+- **并行执行**：同时运行多个终端操作
+- **协作调试**：一个代理调查问题，另一个代理实现修复
+
+#### 与 winterm2 的集成
+
+```powershell
+# 在 Claude Code 项目中，使用 winterm2 命令
+wt2 window new --profile PowerShell
+wt2 split --direction vertical
+wt2 broadcast send "git status" --all
+```
+
+#### 团队配置示例
+
+```json
+// .claude/teams/winterm2-automation.json
+{
+  "team_name": "winterm2-automation",
+  "members": [
+    {
+      "name": "window-manager",
+      "role": "创建和管理终端窗口和标签页",
+      "commands": ["wt2 window new", "wt2 tab new", "wt2 pane split"]
+    },
+    {
+      "name": "session-operator",
+      "role": "发送命令和管理会话",
+      "commands": ["wt2 session send", "wt2 session run", "wt2 broadcast"]
+    }
+  ]
+}
+```
+
+详细配置文档请参考：
+- [Claude Teams 文档](https://code.claude.com/docs/zh-CN/agent-teams)
+- [团队配置指南](https://code.claude.com/docs/zh-CN/agent-teams#when-to-use-agent-teams)
 
 ### 贡献
 
