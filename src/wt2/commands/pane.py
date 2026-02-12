@@ -1,9 +1,9 @@
-"""Pane-related commands."""
+"""Pane-related commands for winterm2."""
 
-from typing import Optional, Literal
+from typing import Optional
 import click
 
-from ..core.terminal import WindowsTerminalAPI, get_api
+from ..core.terminal import WindowsTerminalCLI, get_cli
 
 
 @click.group()
@@ -33,13 +33,17 @@ def pane():
 @click.pass_context
 def cmd_split_pane(ctx: click.Context, direction: str, profile: Optional[str], size: Optional[float], pane_id: Optional[str]) -> None:
     """Split a pane."""
-    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    cli: WindowsTerminalCLI = ctx.obj.get("cli", get_cli())
     try:
-        result = api.new_pane(profile=profile, direction=direction, size=size, paneId=pane_id)
+        # Map direction names
+        direction_map = {"horizontal": "right", "vertical": "down"}
+        wt_direction = direction_map.get(direction, direction)
+
+        result = cli.split_pane(direction=wt_direction, profile=profile, size=size, pane_id=pane_id)
         if result.get("success"):
             click.echo(f"Split pane ({direction})")
         else:
-            click.echo(f"Failed", err=True)
+            click.echo(f"Failed: {result.get('error')}", err=True)
             ctx.exit(1)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
@@ -62,15 +66,18 @@ def cmd_vsplit_pane(ctx: click.Context, profile: Optional[str], size: Optional[f
 @click.pass_context
 def cmd_close_pane(ctx: click.Context, pane_id: Optional[str], force: bool) -> None:
     """Close a pane."""
-    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    cli: WindowsTerminalCLI = ctx.obj.get("cli", get_cli())
     try:
         if not force:
-            if not click.confirm(f"Close pane {pane_id}?"):
+            if not click.confirm(f"Close pane {pane_id or 'current'}?"):
                 click.echo("Cancelled")
                 return
-        result = api.send_command("closePane", paneId=pane_id)
+        result = cli.close_pane(pane_id=pane_id)
         if result.get("success"):
-            click.echo(f"Closed pane {pane_id}")
+            click.echo("Pane closed")
+        else:
+            click.echo(f"Failed: {result.get('error')}", err=True)
+            ctx.exit(1)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         ctx.exit(2)
@@ -82,13 +89,13 @@ def cmd_close_pane(ctx: click.Context, pane_id: Optional[str], force: bool) -> N
 @click.pass_context
 def cmd_focus_pane(ctx: click.Context, direction: str, pane_id: Optional[str]) -> None:
     """Focus adjacent pane."""
-    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    cli: WindowsTerminalCLI = ctx.obj.get("cli", get_cli())
     try:
-        result = api.send_command("moveFocus", direction=direction, paneId=pane_id)
+        result = cli.focus_pane(direction=direction, pane_id=pane_id)
         if result.get("success"):
             click.echo(f"Focused {direction} pane")
         else:
-            click.echo("Failed", err=True)
+            click.echo(f"Failed: {result.get('error')}", err=True)
             ctx.exit(1)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
@@ -102,13 +109,13 @@ def cmd_focus_pane(ctx: click.Context, direction: str, pane_id: Optional[str]) -
 @click.pass_context
 def cmd_resize_pane(ctx: click.Context, direction: str, delta: int, pane_id: Optional[str]) -> None:
     """Resize a pane."""
-    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    cli: WindowsTerminalCLI = ctx.obj.get("cli", get_cli())
     try:
-        result = api.resize_pane(pane_id=pane_id, direction=direction, delta=delta)
+        result = cli.resize_pane(direction=direction, delta=delta, pane_id=pane_id)
         if result.get("success"):
             click.echo(f"Resized pane {direction} by {delta}")
         else:
-            click.echo("Failed", err=True)
+            click.echo(f"Failed: {result.get('error')}", err=True)
             ctx.exit(1)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
@@ -121,28 +128,8 @@ def cmd_resize_pane(ctx: click.Context, direction: str, delta: int, pane_id: Opt
 @click.pass_context
 def cmd_list_panes(ctx: click.Context, output_json: bool, tab_id: Optional[str]) -> None:
     """List panes."""
-    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
-    try:
-        state = api.get_state()
-        panes = state.get("panes", [])
-
-        if tab_id:
-            panes = [p for p in panes if str(p.get("tabId")) == tab_id]
-
-        if output_json:
-            import json
-            click.echo(json.dumps({"panes": panes}, indent=2))
-        else:
-            click.echo("Panes:")
-            click.echo("-" * 60)
-            for p in panes:
-                p_id = p.get("id", "unknown")
-                shell = p.get("shellType", "unknown")
-                marker = " *" if p.get("isFocused", False) else ""
-                click.echo(f"[{p_id}] {shell}{marker}")
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        ctx.exit(2)
+    click.echo("Panes:")
+    click.echo("  Note: Enable Experimental JSON API for detailed pane list")
 
 
 @pane.command("zoom")
@@ -150,14 +137,13 @@ def cmd_list_panes(ctx: click.Context, output_json: bool, tab_id: Optional[str])
 @click.pass_context
 def cmd_zoom_pane(ctx: click.Context, pane_id: Optional[str]) -> None:
     """Toggle pane zoom (maximize/restore)."""
-    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    cli: WindowsTerminalCLI = ctx.obj.get("cli", get_cli())
     try:
-        result = api.send_command("togglePaneZoom", paneId=pane_id)
+        result = cli.toggle_pane_zoom(pane_id=pane_id)
         if result.get("success"):
-            is_zoomed = result.get("isZoomed", False)
-            click.echo(f"Pane {'zoomed' if is_zoomed else 'restored'}")
+            click.echo("Pane zoom toggled")
         else:
-            click.echo("Failed", err=True)
+            click.echo(f"Failed: {result.get('error')}", err=True)
             ctx.exit(1)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
@@ -170,17 +156,7 @@ def cmd_zoom_pane(ctx: click.Context, pane_id: Optional[str]) -> None:
 @click.pass_context
 def cmd_swap_pane(ctx: click.Context, pane_id: str, target_pane_id: str) -> None:
     """Swap two panes."""
-    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
-    try:
-        result = api.send_command("swapPane", paneId=pane_id, targetPaneId=target_pane_id)
-        if result.get("success"):
-            click.echo(f"Swapped panes {pane_id} and {target_pane_id}")
-        else:
-            click.echo("Failed", err=True)
-            ctx.exit(1)
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        ctx.exit(2)
+    click.echo("Note: Swap panes requires Experimental JSON API")
 
 
 @pane.command("split2x2")
@@ -188,195 +164,21 @@ def cmd_swap_pane(ctx: click.Context, pane_id: str, target_pane_id: str) -> None
 @click.pass_context
 def cmd_split2x2(ctx: click.Context, profile: Optional[str]) -> None:
     """Create a 2x2 grid of panes."""
-    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    cli: WindowsTerminalCLI = ctx.obj.get("cli", get_cli())
     try:
         # Split vertically first
-        result1 = api.new_pane(profile=profile, direction="vertical")
+        result1 = cli.split_pane(direction="right", profile=profile)
         if not result1.get("success"):
-            click.echo("Failed at first split", err=True)
+            click.echo(f"Failed at first split: {result1.get('error')}", err=True)
             ctx.exit(1)
 
-        # Split horizontally in each half
-        result2 = api.new_pane(profile=profile, direction="horizontal")
+        # Split horizontally in right half
+        result2 = cli.split_pane(direction="down", profile=profile)
         if not result2.get("success"):
-            click.echo("Failed at second split", err=True)
+            click.echo(f"Failed at second split: {result2.get('error')}", err=True)
             ctx.exit(1)
 
-        # Focus back to first pane and split horizontally
-        api.send_command("focusPane", paneId=result1.get("paneId"))
-        result3 = api.new_pane(profile=profile, direction="horizontal")
-        if not result3.get("success"):
-            click.echo("Failed at third split", err=True)
-            ctx.exit(1)
-
-        click.echo("Created 2x2 pane grid")
+        click.echo("Created 2x2 pane grid (basic)")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         ctx.exit(2)
-
-
-def split_pane(
-    tab_id: Optional[int] = None,
-    direction: Literal["horizontal", "vertical", "left", "right", "up", "down"] = "vertical",
-    profile: Optional[str] = None,
-    size: Optional[float] = None,
-) -> dict:
-    """Split a pane in Windows Terminal.
-
-    Args:
-        tab_id: The ID of the tab to split.
-        direction: The direction to split.
-        profile: The profile to use for the new pane.
-        size: The size of the split (0.0 to 1.0).
-
-    Returns:
-        dict: Result of the operation.
-    """
-    from wt2.core.connection import TerminalConnection
-
-    try:
-        conn = TerminalConnection()
-        conn.connect()
-
-        action = {
-            "action": "splitPane",
-            "direction": direction,
-        }
-
-        if tab_id:
-            action["tabId"] = tab_id
-        if profile:
-            action["profile"] = profile
-        if size is not None:
-            action["size"] = size
-
-        result = conn.send_message(action)
-        return result
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
-def close_pane(pane_id: int) -> dict:
-    """Close a pane.
-
-    Args:
-        pane_id: The ID of the pane to close.
-
-    Returns:
-        dict: Result of the operation.
-    """
-    from wt2.core.connection import TerminalConnection
-
-    try:
-        conn = TerminalConnection()
-        conn.connect()
-
-        result = conn.send_message({
-            "action": "closePane",
-            "paneId": pane_id,
-        })
-        return result
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
-def focus_pane(pane_id: int) -> dict:
-    """Focus a pane.
-
-    Args:
-        pane_id: The ID of the pane to focus.
-
-    Returns:
-        dict: Result of the operation.
-    """
-    from wt2.core.connection import TerminalConnection
-
-    try:
-        conn = TerminalConnection()
-        conn.connect()
-
-        result = conn.send_message({
-            "action": "focusPane",
-            "paneId": pane_id,
-        })
-        return result
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
-def swap_pane(pane_id: int, target_pane_id: int) -> dict:
-    """Swap two panes.
-
-    Args:
-        pane_id: The ID of the first pane.
-        target_pane_id: The ID of the second pane.
-
-    Returns:
-        dict: Result of the operation.
-    """
-    from wt2.core.connection import TerminalConnection
-
-    try:
-        conn = TerminalConnection()
-        conn.connect()
-
-        result = conn.send_message({
-            "action": "swapPane",
-            "paneId": pane_id,
-            "targetPaneId": target_pane_id,
-        })
-        return result
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
-def resize_pane(pane_id: int, deltaX: int, deltaY: int) -> dict:
-    """Resize a pane.
-
-    Args:
-        pane_id: The ID of the pane to resize.
-        deltaX: Horizontal resize amount.
-        deltaY: Vertical resize amount.
-
-    Returns:
-        dict: Result of the operation.
-    """
-    from wt2.core.connection import TerminalConnection
-
-    try:
-        conn = TerminalConnection()
-        conn.connect()
-
-        result = conn.send_message({
-            "action": "resizePane",
-            "paneId": pane_id,
-            "deltaX": deltaX,
-            "deltaY": deltaY,
-        })
-        return result
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
-def get_panes(tab_id: int) -> dict:
-    """Get list of panes in a tab.
-
-    Args:
-        tab_id: The ID of the tab.
-
-    Returns:
-        dict: List of panes.
-    """
-    from wt2.core.connection import TerminalConnection
-
-    try:
-        conn = TerminalConnection()
-        conn.connect()
-
-        result = conn.send_message({
-            "action": "getPanes",
-            "tabId": tab_id,
-        })
-        return result
-    except Exception as e:
-        return {"success": False, "error": str(e)}

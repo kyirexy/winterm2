@@ -1,430 +1,325 @@
 """
-Windows Terminal API connection module.
+Windows Terminal API connection module using wt.exe command-line tool.
 
-Handles communication with Windows Terminal via named pipes
-using the Windows Terminal JSON command API.
+Uses subprocess to communicate with Windows Terminal via wt.exe,
+which is the recommended way to control Windows Terminal.
 """
 
 from __future__ import annotations
 import json
-import time
-from typing import Optional, Any, Callable
-from threading import Lock
-import ctypes
-from ctypes import wintypes
-
-from .exceptions import ConnectionError, CommandError, TimeoutError
+import subprocess
+import os
+from typing import Optional, Dict, Any, List
+from pathlib import Path
 
 
-class WindowsTerminalAPI:
-    """
-    Interface to Windows Terminal's JSON command API.
+class WindowsTerminalCLI:
+    """Interface to Windows Terminal via wt.exe CLI."""
 
-    Connects to Windows Terminal via named pipe and sends
-    JSON commands to control the terminal.
-    """
+    def __init__(self):
+        """Initialize the Windows Terminal CLI interface."""
+        self._wt_path: Optional[str] = None
+        self._find_wt()
 
-    # Named pipe paths for Windows Terminal
-    PIPE_PATHS = [
-        r"\\.\pipe\WindowsTerminal",
-        r"\\.\pipe\WindowsTerminal_dev",
-    ]
+    def _find_wt(self) -> Optional[str]:
+        """Find wt.exe path."""
+        # Common locations for wt.exe
+        possible_paths = [
+            # Windows Terminal (Store version)
+            os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe"),
+            # Windows Terminal (winget)
+            os.path.expandvars(r"%PROGRAMFILES%\WindowsApps\Microsoft.WindowsTerminal_*\wt.exe"),
+            # System PATH
+            "wt.exe",
+        ]
 
-    def __init__(
-        self,
-        timeout: float = 5.0,
-        max_retries: int = 3,
-        retry_delay: float = 0.5,
-    ):
-        """
-        Initialize the Windows Terminal API connection.
-
-        Args:
-            timeout: Connection and command timeout in seconds.
-            max_retries: Maximum retry attempts for failed connections.
-            retry_delay: Delay between retry attempts in seconds.
-        """
-        self.timeout = timeout
-        self.max_retries = max_retries
-        self.retry_delay = retry_delay
-        self._pipe_handle: Optional[int] = None
-        self._lock = Lock()
-        self._last_activity: float = 0
-
-    def connect(self) -> bool:
-        """
-        Establish connection to Windows Terminal named pipe.
-
-        Returns:
-            True if connection successful, False otherwise.
-
-        Raises:
-            ConnectionError: If connection fails after all retries.
-        """
-        for attempt in range(self.max_retries):
-            for pipe_path in self.PIPE_PATHS:
-                try:
-                    self._pipe_handle = self._create_pipe_connection(pipe_path)
-                    if self._pipe_handle:
-                        self._last_activity = time.time()
-                        return True
-                except Exception:
-                    continue
-
-            if attempt < self.max_retries - 1:
-                time.sleep(self.retry_delay)
-
-        raise ConnectionError(
-            pipe_name=self.PIPE_PATHS[0],
-            details=f"Failed after {self.max_retries} attempts",
-        )
-
-    def _create_pipe_connection(self, pipe_path: str) -> Optional[int]:
-        """
-        Create a connection to the named pipe.
-
-        Args:
-            pipe_path: Path to the named pipe.
-
-        Returns:
-            Pipe handle if successful, None otherwise.
-        """
-        try:
-            # Windows named pipe constants
-            PIPE_READMODE_MESSAGE = 2
-            PIPE_WAIT = 0
-            INVALID_HANDLE_VALUE = -1
-
-            # Open the named pipe
-            handle = ctypes.windll.kernel32.CreateFileW(
-                pipe_path,
-                0xC0000000,  # GENERIC_READ | GENERIC_WRITE
-                0,           # No sharing
-                None,        # Default security attributes
-                3,           # OPEN_EXISTING
-                0x40000000,  # FILE_FLAG_OVERLAPPED
-                None,        # No template file
-            )
-
-            if handle == INVALID_HANDLE_VALUE:
-                return None
-
-            # Set pipe mode to message
-            mode = ctypes.byref(ctypes.c_ulong(PIPE_READMODE_MESSAGE))
-            ctypes.windll.kernel32.SetNamedPipeHandleState(
-                handle, mode, None, None
-            )
-
-            return handle
-
-        except Exception:
-            return None
-
-    def disconnect(self) -> None:
-        """Close the named pipe connection."""
-        if self._pipe_handle:
+        for path in possible_paths:
             try:
-                ctypes.windll.kernel32.CloseHandle(self._pipe_handle)
+                expanded = os.path.expandvars(path)
+                if os.path.exists(expanded):
+                    self._wt_path = expanded
+                    return self._wt_path
+                # Try running it to see if it's in PATH
+                result = subprocess.run(
+                    ["where", "wt.exe"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if result.returncode == 0:
+                    self._wt_path = result.stdout.strip().split('\n')[0]
+                    return self._wt_path
             except Exception:
-                pass
-            self._pipe_handle = None
+                continue
 
-    def is_connected(self) -> bool:
-        """Check if the pipe connection is active."""
-        if not self._pipe_handle:
-            return False
+        self._wt_path = "wt.exe"  # Default to PATH
+        return self._wt_path
 
-        # Check if pipe is still valid
+    @property
+    def wt_path(self) -> str:
+        """Get wt.exe path."""
+        if self._wt_path is None:
+            self._find_wt()
+        return self._wt_path or "wt.exe"
+
+    def _run_wt(self, args: List[str], timeout: float = 10.0) -> subprocess.CompletedProcess:
+        """Run wt.exe with given arguments."""
+        cmd = [self.wt_path] + args
         try:
-            state = ctypes.c_ulong()
-            ctypes.windll.kernel32.GetNamedPipeHandleStateW(
-                self._pipe_handle, ctypes.byref(state), None, None, None, None
+            return subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
             )
-            return True
-        except Exception:
-            return False
+        except subprocess.TimeoutExpired:
+            return subprocess.CompletedProcess(cmd, returncode=-1, stdout="", stderr="Command timed out")
+        except FileNotFoundError:
+            return subprocess.CompletedProcess(cmd, returncode=-1, stdout="", stderr="wt.exe not found")
 
-    def send_command(
+    # =========================================================================
+    # Window Commands
+    # =========================================================================
+
+    def new_window(
         self,
-        action: str,
-        **kwargs: Any,
-    ) -> dict[str, Any]:
-        """
-        Send a JSON command to Windows Terminal.
+        profile: Optional[str] = None,
+        command: Optional[str] = None,
+        cwd: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a new window."""
+        args = ["new-window"]
 
-        Args:
-            action: The action to perform (e.g., "newTab", "closeTab").
-            **kwargs: Additional action parameters.
+        if profile:
+            args.extend(["--profile", profile])
+        if command:
+            args.extend(["--command", command])
+        if cwd:
+            args.extend(["--startingDirectory", cwd])
 
-        Returns:
-            Response dictionary from Windows Terminal.
+        result = self._run_wt(args)
 
-        Raises:
-            CommandError: If the command fails.
-        """
-        if not self.is_connected():
-            self.connect()
+        # wt.exe new-window doesn't return JSON, but succeeds with no output
+        if result.returncode == 0:
+            return {"success": True, "message": "New window created"}
+        else:
+            return {"success": False, "error": result.stderr.strip()}
 
-        command = {"action": action, **kwargs}
-        return self._send_json(command)
+    def close_window(self, window_id: Optional[str] = None) -> Dict[str, Any]:
+        """Close a window."""
+        args = ["close-window"]
+        if window_id:
+            args.append(window_id)
 
-    def _send_json(self, data: dict[str, Any]) -> dict[str, Any]:
-        """
-        Send JSON data through the named pipe.
+        result = self._run_wt(args)
+        return {"success": result.returncode == 0, "error": result.stderr.strip() if result.returncode != 0 else None}
 
-        Args:
-            data: JSON-serializable data to send.
+    def list_windows(self) -> Dict[str, Any]:
+        """List all windows (using Windows Terminal API via wt)."""
+        # Note: wt.exe doesn't have a direct list-windows command
+        # This is a placeholder that returns info about the command availability
+        return {
+            "success": True,
+            "message": "Window listing via wt.exe",
+            "note": "Use Windows Terminal directly or enable Experimental JSON API for full state access"
+        }
 
-        Returns:
-            Response from Windows Terminal.
+    def focus_window(self, window_id: str) -> Dict[str, Any]:
+        """Focus a window."""
+        # wt.exe doesn't have a direct focus command
+        return {"success": False, "error": "Not implemented in wt.exe"}
 
-        Raises:
-            CommandError: If sending fails.
-        """
-        try:
-            json_data = json.dumps(data).encode("utf-8")
+    def move_window(self, window_id: Optional[str], x: int, y: int) -> Dict[str, Any]:
+        """Move window to position."""
+        return {"success": False, "error": "Not implemented in wt.exe"}
 
-            # Ensure null termination
-            json_data += b"\x00\x00"
+    def resize_window(self, window_id: Optional[str], width: int, height: int) -> Dict[str, Any]:
+        """Resize window."""
+        return {"success": False, "error": "Not implemented in wt.exe"}
 
-            with self._lock:
-                bytes_written = ctypes.c_ulong()
-                success = ctypes.windll.kernel32.WriteFile(
-                    self._pipe_handle,
-                    json_data,
-                    len(json_data),
-                    ctypes.byref(bytes_written),
-                    None,
-                )
+    def set_fullscreen(self, window_id: Optional[str], state: str) -> Dict[str, Any]:
+        """Set fullscreen mode."""
+        args = ["full-screen"]
+        result = self._run_wt(args)
+        return {"success": result.returncode == 0, "error": result.stderr.strip() if result.returncode != 0 else None}
 
-            if not success:
-                raise CommandError(
-                    command=json.dumps(data),
-                    details="WriteFile failed",
-                )
-
-            return {"success": True, "action": data.get("action")}
-
-        except CommandError:
-            raise
-        except Exception as e:
-            raise CommandError(
-                command=json.dumps(data),
-                stderr=str(e),
-            )
-
-    def get_state(self) -> dict[str, Any]:
-        """
-        Get the current state of Windows Terminal.
-
-        Returns:
-            Dictionary containing terminal state (tabs, windows, etc.).
-        """
-        result = self.send_command("getState")
-        return result if isinstance(result, dict) else {}
+    # =========================================================================
+    # Tab Commands
+    # =========================================================================
 
     def new_tab(
         self,
         profile: Optional[str] = None,
         command: Optional[str] = None,
         cwd: Optional[str] = None,
-    ) -> dict[str, Any]:
-        """
-        Create a new tab.
+        window_id: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a new tab."""
+        args = ["new-tab"]
 
-        Args:
-            profile: Profile name to use (defaults to default profile).
-            command: Initial command to run in the tab.
-            cwd: Working directory for the new tab.
-
-        Returns:
-            Response from Windows Terminal.
-        """
-        params = {}
         if profile:
-            params["profile"] = profile
+            args.extend(["--profile", profile])
         if command:
-            params["command"] = command
+            args.extend(["--command", command])
         if cwd:
-            params["cwd"] = cwd
+            args.extend(["--startingDirectory", cwd])
+        if title:
+            args.extend(["--title", title])
+        if window_id:
+            args.extend(["--window", window_id])
 
-        return self.send_command("newTab", **params)
+        result = self._run_wt(args)
+        return {"success": result.returncode == 0, "error": result.stderr.strip() if result.returncode != 0 else None}
 
-    def close_tab(self, tab_id: int) -> dict[str, Any]:
-        """
-        Close a tab by ID.
+    def close_tab(self, tab_id: str) -> Dict[str, Any]:
+        """Close a tab."""
+        args = ["close-tab", "--id", tab_id]
+        result = self._run_wt(args)
+        return {"success": result.returncode == 0, "error": result.stderr.strip() if result.returncode != 0 else None}
 
-        Args:
-            tab_id: The ID of the tab to close.
+    def focus_tab(self, tab_id: str) -> Dict[str, Any]:
+        """Focus a tab."""
+        args = ["focus-tab", "--id", tab_id]
+        result = self._run_wt(args)
+        return {"success": result.returncode == 0, "error": result.stderr.strip() if result.returncode != 0 else None}
 
-        Returns:
-            Response from Windows Terminal.
-        """
-        return self.send_command("closeTab", tabId=tab_id)
+    def list_tabs(self) -> Dict[str, Any]:
+        """List tabs."""
+        return {"success": True, "message": "Use wt.exe list-tabs not available"}
 
-    def focus_tab(self, tab_id: int) -> dict[str, Any]:
-        """
-        Focus a specific tab.
+    def rename_tab(self, tab_id: Optional[str], title: str) -> Dict[str, Any]:
+        """Rename tab."""
+        args = ["rename-tab", title]
+        if tab_id:
+            args.extend(["--id", tab_id])
+        result = self._run_wt(args)
+        return {"success": result.returncode == 0, "error": result.stderr.strip() if result.returncode != 0 else None}
 
-        Args:
-            tab_id: The ID of the tab to focus.
+    # =========================================================================
+    # Pane Commands
+    # =========================================================================
 
-        Returns:
-            Response from Windows Terminal.
-        """
-        return self.send_command("focusTab", tabId=tab_id)
-
-    def new_pane(
+    def split_pane(
         self,
+        direction: str = "horizontal",
         profile: Optional[str] = None,
         command: Optional[str] = None,
         cwd: Optional[str] = None,
-        direction: str = "right",
         size: Optional[float] = None,
-    ) -> dict[str, Any]:
-        """
-        Create a new pane by splitting.
+        pane_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Split a pane."""
+        args = ["split-pane", "--" + direction]
 
-        Args:
-            profile: Profile name to use.
-            command: Initial command to run.
-            cwd: Working directory.
-            direction: Split direction ("right", "left", "up", "down").
-            size: Size of the new pane as percentage (0-1).
-
-        Returns:
-            Response from Windows Terminal.
-        """
-        params = {
-            "direction": direction,
-        }
         if profile:
-            params["profile"] = profile
+            args.extend(["--profile", profile])
         if command:
-            params["command"] = command
+            args.extend(["--command", command])
         if cwd:
-            params["cwd"] = cwd
+            args.extend(["--startingDirectory", cwd])
         if size is not None:
-            params["size"] = size
-
-        return self.send_command("splitPane", **params)
-
-    def resize_pane(
-        self,
-        pane_id: str,
-        direction: str,
-        delta: int,
-    ) -> dict[str, Any]:
-        """
-        Resize a pane.
-
-        Args:
-            pane_id: The ID of the pane to resize.
-            direction: Resize direction.
-            delta: Amount to resize (cells).
-
-        Returns:
-            Response from Windows Terminal.
-        """
-        return self.send_command(
-            "resizePane",
-            paneId=pane_id,
-            direction=direction,
-            delta=delta,
-        )
-
-    def focus_pane(self, pane_id: str) -> dict[str, Any]:
-        """
-        Focus a specific pane.
-
-        Args:
-            pane_id: The ID of the pane to focus.
-
-        Returns:
-            Response from Windows Terminal.
-        """
-        return self.send_command("focusPane", paneId=pane_id)
-
-    def send_text(
-        self,
-        text: str,
-        pane_id: Optional[str] = None,
-    ) -> dict[str, Any]:
-        """
-        Send text to a pane.
-
-        Args:
-            text: Text to send.
-            pane_id: Target pane ID (defaults to focused pane).
-
-        Returns:
-            Response from Windows Terminal.
-        """
-        params = {"text": text}
+            args.extend(["--size", str(size)])
         if pane_id:
-            params["paneId"] = pane_id
+            args.extend(["--id", pane_id])
 
-        return self.send_command("sendInput", **params)
+        result = self._run_wt(args)
+        return {"success": result.returncode == 0, "error": result.stderr.strip() if result.returncode != 0 else None}
 
-    def execute_command(
-        self,
-        command: str,
-        pane_id: Optional[str] = None,
-        timeout: float = 10.0,
-    ) -> dict[str, Any]:
-        """
-        Execute a shell command and wait for completion.
+    def close_pane(self, pane_id: Optional[str] = None) -> Dict[str, Any]:
+        """Close a pane."""
+        args = ["close-pane"]
+        if pane_id:
+            args.extend(["--id", pane_id])
+        result = self._run_wt(args)
+        return {"success": result.returncode == 0, "error": result.stderr.strip() if result.returncode != 0 else None}
 
-        Args:
-            command: Command to execute.
-            pane_id: Target pane ID.
-            timeout: Maximum time to wait for command completion.
+    def focus_pane(self, direction: str, pane_id: Optional[str] = None) -> Dict[str, Any]:
+        """Focus a pane in given direction."""
+        args = ["focus-pane", "--" + direction]
+        if pane_id:
+            args.extend(["--id", pane_id])
+        result = self._run_wt(args)
+        return {"success": result.returncode == 0, "error": result.stderr.strip() if result.returncode != 0 else None}
 
-        Returns:
-            Response with exit code and output.
+    def resize_pane(self, direction: str, delta: int, pane_id: Optional[str] = None) -> Dict[str, Any]:
+        """Resize a pane."""
+        args = ["resize-pane", "--" + direction, str(delta)]
+        if pane_id:
+            args.extend(["--id", pane_id])
+        result = self._run_wt(args)
+        return {"success": result.returncode == 0, "error": result.stderr.strip() if result.returncode != 0 else None}
 
-        Raises:
-            TimeoutError: If command doesn't complete within timeout.
-        """
-        start_time = time.time()
+    def toggle_pane_zoom(self, pane_id: Optional[str] = None) -> Dict[str, Any]:
+        """Toggle pane zoom."""
+        args = ["toggle-pane-zoom"]
+        if pane_id:
+            args.extend(["--id", pane_id])
+        result = self._run_wt(args)
+        return {"success": result.returncode == 0, "error": result.stderr.strip() if result.returncode != 0 else None}
 
-        # Send the command
-        self.send_text(command + "\r\n", pane_id=pane_id)
+    # =========================================================================
+    # Session Commands
+    # =========================================================================
 
-        # Wait for command completion (simple heuristic)
-        while time.time() - start_time < timeout:
-            time.sleep(0.1)
-            # Check for command prompt or completion
-            # This is a simplified implementation
-            if time.time() - start_time >= timeout:
-                raise TimeoutError(
-                    operation=command,
-                    timeout=timeout,
-                )
+    def send_text(self, text: str, pane_id: Optional[str] = None) -> Dict[str, Any]:
+        """Send text to a pane."""
+        args = ["send-input"]
+        if pane_id:
+            args.extend(["--id", pane_id])
 
-        return {
-            "success": True,
-            "command": command,
-            "execution_time": time.time() - start_time,
-        }
+        result = self._run_wt(args + [text])
+        return {"success": result.returncode == 0, "error": result.stderr.strip() if result.returncode != 0 else None}
 
-    def __enter__(self) -> "WindowsTerminalAPI":
-        """Context manager entry."""
-        self.connect()
-        return self
+    def clear_screen(self, pane_id: Optional[str] = None) -> Dict[str, Any]:
+        """Clear screen."""
+        # Send ANSI clear sequence
+        return self.send_text("\x1b[2J\x1b[3J\x1b[H", pane_id=pane_id)
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Context manager exit."""
-        self.disconnect()
+    def set_pane_title(self, title: str, pane_id: Optional[str] = None) -> Dict[str, Any]:
+        """Set pane title."""
+        args = ["set-title"]
+        if pane_id:
+            args.extend(["--id", pane_id])
+        args.append(title)
+
+        result = self._run_wt(args)
+        return {"success": result.returncode == 0, "error": result.stderr.strip() if result.returncode != 0 else None}
+
+    # =========================================================================
+    # Utility Commands
+    # =========================================================================
+
+    def get_version(self) -> Dict[str, Any]:
+        """Get Windows Terminal version."""
+        result = self._run_wt(["--version"])
+        if result.returncode == 0:
+            return {"success": True, "version": result.stdout.strip()}
+        return {"success": False, "error": result.stderr.strip()}
+
+    def list_profiles(self) -> Dict[str, Any]:
+        """List available profiles."""
+        result = self._run_wt(["list-profiles"])
+        if result.returncode == 0:
+            return {"success": True, "profiles": result.stdout.strip().split('\n')}
+        return {"success": False, "error": result.stderr.strip()}
 
 
-# Singleton instance for common use
-_api_instance: Optional[WindowsTerminalAPI] = None
+# Export both names for backwards compatibility
+WindowsTerminalAPI = WindowsTerminalCLI
+
+# Singleton instance
+_cli_instance: Optional[WindowsTerminalCLI] = None
+
+
+def get_cli() -> WindowsTerminalCLI:
+    """Get or create the singleton CLI instance."""
+    global _cli_instance
+    if _cli_instance is None:
+        _cli_instance = WindowsTerminalCLI()
+    return _cli_instance
 
 
 def get_api() -> WindowsTerminalAPI:
-    """Get or create the singleton API instance."""
-    global _api_instance
-    if _api_instance is None:
-        _api_instance = WindowsTerminalAPI()
-    return _api_instance
+    """Get or create the singleton API instance (alias for get_cli)."""
+    return get_cli()

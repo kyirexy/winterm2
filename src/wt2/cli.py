@@ -88,6 +88,11 @@ def cli(
     # Store context for subcommands
     ctx.ensure_object(dict)
 
+    # Initialize the CLI interface
+    from .core.terminal import WindowsTerminalCLI, get_cli
+    cli_instance = get_cli()
+    ctx.obj["cli"] = cli_instance
+
     # Auto-detect shell if needed
     if shell == "auto":
         detected = get_shell_type()
@@ -187,7 +192,7 @@ def cmd_ls_shortcut(ctx: click.Context, output_json: bool) -> None:
 def cmd_new_shortcut(ctx: click.Context, profile: str | None, size: str | None, startup_dir: str | None) -> None:
     """Shortcut: Create new window (same as 'wt2 window new')."""
     from .commands.window import cmd_new_window
-    ctx.invoke(cmd_new_window, profile=profile, size=size, startup_dir=startup_dir)
+    ctx.invoke(cmd_new_window, profile=profile, command=None, startup_dir=startup_dir)
 
 
 @cli.command("newtab")

@@ -1,9 +1,9 @@
-"""Tab-related commands."""
+"""Tab-related commands for winterm2."""
 
-from typing import Optional, List
+from typing import Optional
 import click
 
-from ..core.terminal import WindowsTerminalAPI, get_api
+from ..core.terminal import WindowsTerminalCLI, get_cli
 
 
 @click.group()
@@ -27,9 +27,9 @@ def tab():
 
 
 @tab.command("new")
-@click.option("--profile", "-p", type=str, default=None)
-@click.option("--title", "-t", type=str, default=None)
-@click.option("--window-id", "-w", type=str, default=None)
+@click.option("--profile", "-p", type=str, default=None, help="Profile to use")
+@click.option("--title", "-t", type=str, default=None, help="Tab title")
+@click.option("--window-id", "-w", type=str, default=None, help="Window ID")
 @click.option("--command", "-c", type=str, default=None, help="Command to run in new tab")
 @click.pass_context
 def cmd_new_tab(
@@ -40,20 +40,13 @@ def cmd_new_tab(
     command: Optional[str],
 ) -> None:
     """Create a new tab."""
-    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    cli: WindowsTerminalCLI = ctx.obj.get("cli", get_cli())
     try:
-        params = {"profile": profile or ctx.obj.get("profile")}
-        if title:
-            params["title"] = title
-        if window_id:
-            params["windowId"] = window_id
-        if command:
-            params["command"] = command
-        result = api.new_tab(**params)
+        result = cli.new_tab(profile=profile, command=command, cwd=None, window_id=window_id, title=title)
         if result.get("success"):
-            click.echo(f"Created new tab")
+            click.echo("New tab created")
         else:
-            click.echo(f"Failed", err=True)
+            click.echo(f"Failed: {result.get('error')}", err=True)
             ctx.exit(1)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
@@ -66,27 +59,18 @@ def cmd_new_tab(
 @click.pass_context
 def cmd_close_tab(ctx: click.Context, tab_id: Optional[str], force: bool) -> None:
     """Close a tab."""
-    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    cli: WindowsTerminalCLI = ctx.obj.get("cli", get_cli())
     try:
-        if not tab_id:
-            state = api.get_state()
-            tabs = state.get("tabs", [])
-            if tabs:
-                for t in tabs:
-                    if t.get("isFocused", False):
-                        tab_id = str(t.get("id"))
-                        break
-        if not tab_id:
-            click.echo("No tab specified", err=True)
-            ctx.exit(3)
-            return
         if not force:
-            if not click.confirm(f"Close tab {tab_id}?"):
+            if not click.confirm(f"Close tab {tab_id or 'current'}?"):
                 click.echo("Cancelled")
                 return
-        result = api.close_tab(tab_id=int(tab_id))
+        result = cli.close_tab(tab_id=tab_id)
         if result.get("success"):
-            click.echo(f"Closed tab {tab_id}")
+            click.echo("Tab closed")
+        else:
+            click.echo(f"Failed: {result.get('error')}", err=True)
+            ctx.exit(1)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         ctx.exit(2)
@@ -97,13 +81,13 @@ def cmd_close_tab(ctx: click.Context, tab_id: Optional[str], force: bool) -> Non
 @click.pass_context
 def cmd_focus_tab(ctx: click.Context, tab_id: str) -> None:
     """Focus a tab by ID."""
-    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    cli: WindowsTerminalCLI = ctx.obj.get("cli", get_cli())
     try:
-        result = api.send_command("focusTab", tabId=tab_id)
+        result = cli.focus_tab(tab_id)
         if result.get("success"):
-            click.echo(f"Focused tab {tab_id}")
+            click.echo(f"Focused tab: {tab_id}")
         else:
-            click.echo(f"Failed", err=True)
+            click.echo(f"Failed: {result.get('error')}", err=True)
             ctx.exit(1)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
@@ -116,24 +100,19 @@ def cmd_focus_tab(ctx: click.Context, tab_id: str) -> None:
 @click.pass_context
 def cmd_select_tab(ctx: click.Context, tab_id_or_index: str, window_id: Optional[str]) -> None:
     """Select tab by ID or index."""
-    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    cli: WindowsTerminalCLI = ctx.obj.get("cli", get_cli())
     try:
         # Try to parse as index
         try:
             index = int(tab_id_or_index)
-            result = api.send_command("selectTabByIndex", index=index, windowId=window_id)
-            if result.get("success"):
-                click.echo(f"Selected tab at index {index}")
-            else:
-                click.echo(f"Failed", err=True)
-                ctx.exit(1)
+            click.echo(f"Switching to tab at index {index} (not fully implemented)")
         except ValueError:
             # ID-based selection
-            result = api.send_command("focusTab", tabId=tab_id_or_index)
+            result = cli.focus_tab(tab_id_or_index)
             if result.get("success"):
-                click.echo(f"Selected tab {tab_id_or_index}")
+                click.echo(f"Selected tab: {tab_id_or_index}")
             else:
-                click.echo(f"Failed", err=True)
+                click.echo(f"Failed: {result.get('error')}", err=True)
                 ctx.exit(1)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
@@ -146,22 +125,15 @@ def cmd_select_tab(ctx: click.Context, tab_id_or_index: str, window_id: Optional
 @click.pass_context
 def cmd_list_tabs(ctx: click.Context, output_json: bool, window_id: Optional[str]) -> None:
     """List all tabs."""
-    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    cli: WindowsTerminalCLI = ctx.obj.get("cli", get_cli())
     try:
-        state = api.get_state()
-        tabs = state.get("tabs", [])
-
-        if output_json:
-            import json
-            click.echo(json.dumps({"tabs": tabs}, indent=2))
-        else:
+        result = cli.list_tabs()
+        if result.get("success"):
             click.echo("Tabs:")
-            click.echo("-" * 60)
-            for idx, t in enumerate(tabs):
-                t_id = t.get("id", "unknown")
-                title = t.get("title", "Untitled")
-                marker = " *" if t.get("isFocused", False) else ""
-                click.echo(f"[{t_id}] {title}{marker}")
+            click.echo("  Note: Enable Experimental JSON API for detailed tab list")
+        else:
+            click.echo(f"Failed: {result.get('error')}", err=True)
+            ctx.exit(1)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         ctx.exit(2)
@@ -171,34 +143,14 @@ def cmd_list_tabs(ctx: click.Context, output_json: bool, window_id: Optional[str
 @click.pass_context
 def cmd_next_tab(ctx: click.Context) -> None:
     """Switch to next tab."""
-    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
-    try:
-        result = api.send_command("nextTab")
-        if result.get("success"):
-            click.echo("Switched to next tab")
-        else:
-            click.echo(f"Failed", err=True)
-            ctx.exit(1)
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        ctx.exit(2)
+    click.echo("Note: Next/Prev tab switching requires Experimental JSON API")
 
 
 @tab.command("prev")
 @click.pass_context
 def cmd_prev_tab(ctx: click.Context) -> None:
     """Switch to previous tab."""
-    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
-    try:
-        result = api.send_command("prevTab")
-        if result.get("success"):
-            click.echo("Switched to previous tab")
-        else:
-            click.echo(f"Failed", err=True)
-            ctx.exit(1)
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        ctx.exit(2)
+    click.echo("Note: Next/Prev tab switching requires Experimental JSON API")
 
 
 @tab.command("goto")
@@ -207,17 +159,7 @@ def cmd_prev_tab(ctx: click.Context) -> None:
 @click.pass_context
 def cmd_goto_tab(ctx: click.Context, index: int, window_id: Optional[str]) -> None:
     """Go to tab by index (0-based)."""
-    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
-    try:
-        result = api.send_command("selectTabByIndex", index=index, windowId=window_id)
-        if result.get("success"):
-            click.echo(f"Switched to tab {index}")
-        else:
-            click.echo(f"Failed", err=True)
-            ctx.exit(1)
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        ctx.exit(2)
+    click.echo(f"Note: Goto tab by index requires Experimental JSON API")
 
 
 @tab.command("rename")
@@ -226,20 +168,13 @@ def cmd_goto_tab(ctx: click.Context, index: int, window_id: Optional[str]) -> No
 @click.pass_context
 def cmd_rename_tab(ctx: click.Context, tab_id: Optional[str], title: str) -> None:
     """Rename a tab."""
-    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    cli: WindowsTerminalCLI = ctx.obj.get("cli", get_cli())
     try:
-        if not tab_id:
-            state = api.get_state()
-            tabs = state.get("tabs", [])
-            for t in tabs:
-                if t.get("isFocused", False):
-                    tab_id = str(t.get("id"))
-                    break
-        result = api.send_command("renameTab", tabId=tab_id, title=title)
+        result = cli.rename_tab(tab_id=tab_id, title=title)
         if result.get("success"):
             click.echo(f"Renamed tab to: {title}")
         else:
-            click.echo(f"Failed", err=True)
+            click.echo(f"Failed: {result.get('error')}", err=True)
             ctx.exit(1)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
@@ -251,161 +186,4 @@ def cmd_rename_tab(ctx: click.Context, tab_id: Optional[str], title: str) -> Non
 @click.pass_context
 def cmd_move_tab(ctx: click.Context, tab_id: Optional[str]) -> None:
     """Move tab to its own new window."""
-    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
-    try:
-        if not tab_id:
-            state = api.get_state()
-            tabs = state.get("tabs", [])
-            for t in tabs:
-                if t.get("isFocused", False):
-                    tab_id = str(t.get("id"))
-                    break
-        result = api.send_command("moveTabToNewWindow", tabId=tab_id)
-        if result.get("success"):
-            click.echo("Moved tab to new window")
-        else:
-            click.echo(f"Failed", err=True)
-            ctx.exit(1)
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        ctx.exit(2)
-
-
-def new_tab(
-    window_id: Optional[int] = None,
-    profile: Optional[str] = None,
-    title: Optional[str] = None,
-    command: Optional[str] = None,
-) -> dict:
-    """Create a new tab in Windows Terminal.
-
-    Args:
-        window_id: The ID of the window to create the tab in.
-        profile: The profile to use for the new tab.
-        title: The title of the new tab.
-        command: Initial command to run in the tab.
-
-    Returns:
-        dict: Result of the operation.
-    """
-    from wt2.core.connection import TerminalConnection
-
-    try:
-        conn = TerminalConnection()
-        conn.connect()
-
-        action = {
-            "action": "newTab",
-        }
-
-        if window_id:
-            action["windowId"] = window_id
-        if profile:
-            action["profile"] = profile
-        if title:
-            action["title"] = title
-        if command:
-            action["command"] = command
-
-        result = conn.send_message(action)
-        return result
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
-def close_tab(tab_id: int) -> dict:
-    """Close a tab.
-
-    Args:
-        tab_id: The ID of the tab to close.
-
-    Returns:
-        dict: Result of the operation.
-    """
-    from wt2.core.connection import TerminalConnection
-
-    try:
-        conn = TerminalConnection()
-        conn.connect()
-
-        result = conn.send_message({
-            "action": "closeTab",
-            "tabId": tab_id,
-        })
-        return result
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
-def focus_tab(tab_id: int) -> dict:
-    """Focus a tab.
-
-    Args:
-        tab_id: The ID of the tab to focus.
-
-    Returns:
-        dict: Result of the operation.
-    """
-    from wt2.core.connection import TerminalConnection
-
-    try:
-        conn = TerminalConnection()
-        conn.connect()
-
-        result = conn.send_message({
-            "action": "focusTab",
-            "tabId": tab_id,
-        })
-        return result
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
-def rename_tab(tab_id: int, title: str) -> dict:
-    """Rename a tab.
-
-    Args:
-        tab_id: The ID of the tab to rename.
-        title: The new title for the tab.
-
-    Returns:
-        dict: Result of the operation.
-    """
-    from wt2.core.connection import TerminalConnection
-
-    try:
-        conn = TerminalConnection()
-        conn.connect()
-
-        result = conn.send_message({
-            "action": "renameTab",
-            "tabId": tab_id,
-            "title": title,
-        })
-        return result
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
-def get_tabs(window_id: int) -> dict:
-    """Get list of tabs in a window.
-
-    Args:
-        window_id: The ID of the window.
-
-    Returns:
-        dict: List of tabs.
-    """
-    from wt2.core.connection import TerminalConnection
-
-    try:
-        conn = TerminalConnection()
-        conn.connect()
-
-        result = conn.send_message({
-            "action": "getTabs",
-            "windowId": window_id,
-        })
-        return result
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    click.echo("Note: Move tab to new window requires Experimental JSON API")
