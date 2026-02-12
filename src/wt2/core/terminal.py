@@ -23,36 +23,57 @@ class WindowsTerminalCLI:
 
     def _find_wt(self) -> Optional[str]:
         """Find wt.exe path."""
+        import glob
+
         # Common locations for wt.exe
         possible_paths = [
-            # Windows Terminal (Store version)
-            os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe"),
-            # Windows Terminal (winget)
+            # Windows Terminal Store version (find actual exe in package folder)
+            os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WindowsApps\Microsoft.WindowsTerminal_*\wt.exe"),
+            # Windows Terminal (winget/installed version)
             os.path.expandvars(r"%PROGRAMFILES%\WindowsApps\Microsoft.WindowsTerminal_*\wt.exe"),
-            # System PATH
-            "wt.exe",
+            os.path.expandvars(r"%PROGRAMFILES%\Windows Terminal\wt.exe"),
         ]
 
-        for path in possible_paths:
-            try:
-                expanded = os.path.expandvars(path)
-                if os.path.exists(expanded):
-                    self._wt_path = expanded
+        for pattern in possible_paths:
+            expanded = os.path.expandvars(pattern)
+            matches = glob.glob(expanded)
+            for match in matches:
+                if os.path.exists(match):
+                    self._wt_path = match
                     return self._wt_path
-                # Try running it to see if it's in PATH
-                result = subprocess.run(
-                    ["where", "wt.exe"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                if result.returncode == 0:
-                    self._wt_path = result.stdout.strip().split('\n')[0]
-                    return self._wt_path
-            except Exception:
-                continue
 
-        self._wt_path = "wt.exe"  # Default to PATH
+        # Try using where command
+        try:
+            result = subprocess.run(
+                ["where", "wt.exe"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                # Get the first valid path
+                for line in result.stdout.strip().split('\n'):
+                    if line.strip() and os.path.exists(line.strip()):
+                        self._wt_path = line.strip()
+                        return self._wt_path
+        except Exception:
+            pass
+
+        # Try running wt.exe directly (it might be in PATH via WindowsApps alias)
+        try:
+            result = subprocess.run(
+                ["wt.exe", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                self._wt_path = "wt.exe"
+                return self._wt_path
+        except Exception:
+            pass
+
+        self._wt_path = "wt.exe"
         return self._wt_path
 
     @property
