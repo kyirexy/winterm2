@@ -3,6 +3,7 @@
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 import click
+import os
 
 from ..core.terminal import WindowsTerminalAPI, get_api
 
@@ -13,10 +14,17 @@ def session():
     Session control commands.
 
     Commands:
-        send    - Send a command
-        run     - Run a command
-        clear   - Clear the pane
-        list    - List sessions
+        send        - Send a command
+        run         - Run a command
+        clear       - Clear the pane
+        list        - List sessions
+        restart     - Restart session
+        focus       - Focus a session/pane
+        read        - Read screen contents
+        capture     - Capture screen to file
+        set-name    - Set session name
+        get-var     - Get session variable
+        set-var     - Set session variable
     """
     pass
 
@@ -26,7 +34,7 @@ def session():
 @click.option("--pane-id", type=str, default=None)
 @click.pass_context
 def cmd_send(ctx: click.Context, command: tuple, pane_id: Optional[str]) -> None:
-    """Send a command to the pane."""
+    """Send a command to the pane (no newline)."""
     api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
     try:
         cmd_str = " ".join(command)
@@ -43,14 +51,15 @@ def cmd_send(ctx: click.Context, command: tuple, pane_id: Optional[str]) -> None
 
 @session.command("run")
 @click.argument("command", type=str, required=True)
+@click.option("--pane-id", type=str, default=None)
 @click.pass_context
-def cmd_run(ctx: click.Context, command: str) -> None:
-    """Run a command in a new pane."""
+def cmd_run(ctx: click.Context, command: str, pane_id: Optional[str]) -> None:
+    """Run a command in the pane (with newline)."""
     api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
     try:
-        result = api.new_pane(command=command)
+        result = api.send_text(command + "\r", pane_id=pane_id)
         if result.get("success"):
-            click.echo("Command running")
+            click.echo("Command executed")
         else:
             click.echo("Failed", err=True)
             ctx.exit(1)
@@ -60,12 +69,13 @@ def cmd_run(ctx: click.Context, command: str) -> None:
 
 
 @session.command("clear")
+@click.option("--pane-id", type=str, default=None)
 @click.pass_context
-def cmd_clear(ctx: click.Context) -> None:
+def cmd_clear(ctx: click.Context, pane_id: Optional[str]) -> None:
     """Clear the pane."""
     api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
     try:
-        api.send_text("\x1b[2J\x1b[3J\x1b[H")  # ANSI clear sequence
+        api.send_text("\x1b[2J\x1b[3J\x1b[H", pane_id=pane_id)  # ANSI clear sequence
         click.echo("Cleared")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
@@ -73,18 +83,200 @@ def cmd_clear(ctx: click.Context) -> None:
 
 
 @session.command("list")
+@click.option("--json", "output_json", is_flag=True, default=False)
 @click.pass_context
-def cmd_list(ctx: click.Context) -> None:
-    """List sessions."""
+def cmd_list(ctx: click.Context, output_json: bool) -> None:
+    """List all sessions/panes."""
     api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
     try:
         state = api.get_state()
         panes = state.get("panes", [])
+
+        if output_json:
+            import json
+            click.echo(json.dumps({"sessions": panes}, indent=2))
+        else:
+            click.echo("Sessions:")
+            click.echo("-" * 60)
+            for p in panes:
+                p_id = p.get("id", "unknown")
+                shell = p.get("shellType", "unknown")
+                title = p.get("title", "")
+                marker = " *" if p.get("isFocused", False) else ""
+                click.echo(f"[{p_id}] {shell}{marker} {title}")
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        ctx.exit(2)
+
+
+@session.command("restart")
+@click.option("--pane-id", type=str, default=None)
+@click.pass_context
+def cmd_restart(ctx: click.Context, pane_id: Optional[str]) -> None:
+    """Restart the session."""
+    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    try:
+        result = api.send_command("restartSession", paneId=pane_id)
+        if result.get("success"):
+            click.echo("Session restarted")
+        else:
+            click.echo("Failed", err=True)
+            ctx.exit(1)
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        ctx.exit(2)
+
+
+@session.command("focus")
+@click.argument("pane_id", type=str, required=True)
+@click.pass_context
+def cmd_focus(ctx: click.Context, pane_id: str) -> None:
+    """Focus a specific pane."""
+    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    try:
+        result = api.send_command("focusPane", paneId=pane_id)
+        if result.get("success"):
+            click.echo(f"Focused pane: {pane_id}")
+        else:
+            click.echo("Failed", err=True)
+            ctx.exit(1)
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        ctx.exit(2)
+
+
+@session.command("read")
+@click.option("--pane-id", type=str, default=None)
+@click.option("--lines", "-n", type=int, default=None, help="Number of lines to read")
+@click.pass_context
+def cmd_read(ctx: click.Context, pane_id: Optional[str], lines: Optional[int]) -> None:
+    """Read screen contents."""
+    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    try:
+        state = api.get_state()
+        panes = state.get("panes", [])
+        target_pane = pane_id
+
+        if not target_pane:
+            for p in panes:
+                if p.get("isFocused", False):
+                    target_pane = p.get("id")
+                    break
+
         for p in panes:
-            p_id = p.get("id", "unknown")
-            shell = p.get("shellType", "unknown")
-            marker = " *" if p.get("isFocused", False) else ""
-            click.echo(f"[{p_id}] {shell}{marker}")
+            if p.get("id") == target_pane:
+                contents = p.get("content", "")
+                content_lines = contents.split("\n")
+
+                if lines:
+                    content_lines = content_lines[-lines:]
+
+                click.echo("\n".join(content_lines))
+                break
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        ctx.exit(2)
+
+
+@session.command("capture")
+@click.option("--pane-id", type=str, default=None)
+@click.option("--output", "-o", type=str, required=True, help="Output file path")
+@click.option("--history", is_flag=True, default=False, help="Include scrollback history")
+@click.pass_context
+def cmd_capture(ctx: click.Context, pane_id: Optional[str], output: str, history: bool) -> None:
+    """Capture screen to file."""
+    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    try:
+        state = api.get_state()
+        panes = state.get("panes", [])
+        target_pane = pane_id
+
+        if not target_pane:
+            for p in panes:
+                if p.get("isFocused", False):
+                    target_pane = p.get("id")
+                    break
+
+        for p in panes:
+            if p.get("id") == target_pane:
+                contents = p.get("content", "")
+
+                with open(output, "w", encoding="utf-8") as f:
+                    f.write(contents)
+
+                click.echo(f"Screen captured to: {output}")
+                break
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        ctx.exit(2)
+
+
+@session.command("set-name")
+@click.argument("name", type=str, required=True)
+@click.option("--pane-id", type=str, default=None)
+@click.pass_context
+def cmd_set_name(ctx: click.Context, name: str, pane_id: Optional[str]) -> None:
+    """Set session name."""
+    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    try:
+        result = api.send_command("setPaneTitle", paneId=pane_id, title=name)
+        if result.get("success"):
+            click.echo(f"Session name set to: {name}")
+        else:
+            click.echo("Failed", err=True)
+            ctx.exit(1)
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        ctx.exit(2)
+
+
+@session.command("get-var")
+@click.argument("variable", type=str, required=True)
+@click.option("--pane-id", type=str, default=None)
+@click.pass_context
+def cmd_get_var(ctx: click.Context, variable: str, pane_id: Optional[str]) -> None:
+    """Get session variable value."""
+    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    try:
+        state = api.get_state()
+        panes = state.get("panes", [])
+        target_pane = pane_id
+
+        if not target_pane:
+            for p in panes:
+                if p.get("isFocused", False):
+                    target_pane = p.get("id")
+                    break
+
+        for p in panes:
+            if p.get("id") == target_pane:
+                variables = p.get("variables", {})
+                value = variables.get(variable)
+                if value is not None:
+                    click.echo(value)
+                else:
+                    click.echo(f"Variable '{variable}' not set")
+                break
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        ctx.exit(2)
+
+
+@session.command("set-var")
+@click.argument("variable", type=str, required=True)
+@click.argument("value", type=str, required=True)
+@click.option("--pane-id", type=str, default=None)
+@click.pass_context
+def cmd_set_var(ctx: click.Context, variable: str, value: str, pane_id: Optional[str]) -> None:
+    """Set session variable value."""
+    api: WindowsTerminalAPI = ctx.obj.get("api", get_api())
+    try:
+        result = api.send_command("setVariable", paneId=pane_id, variable=variable, value=value)
+        if result.get("success"):
+            click.echo(f"Set {variable} = {value}")
+        else:
+            click.echo("Failed", err=True)
+            ctx.exit(1)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         ctx.exit(2)

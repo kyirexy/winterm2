@@ -284,3 +284,159 @@ def list_config(ctx: click.Context) -> None:
                 click.echo(f"    ... ({len(value)} total items)")
         else:
             click.echo(f"  {key}: {value}")
+
+
+@config.command("reload")
+@click.pass_context
+def reload_config(ctx: click.Context) -> None:
+    """
+    Reload configuration from file.
+
+    Examples:
+        wt2 config reload
+    """
+    config_path = ctx.obj.get("config_path", str(DEFAULT_CONFIG_PATH))
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        ctx.obj["config"] = config
+        click.echo("Configuration reloaded")
+
+        # Show summary
+        profiles = config.get("profiles", {})
+        workflows = config.get("workflows", {})
+        if profiles:
+            click.echo(f"Profiles: {', '.join(profiles.keys())}")
+        if workflows:
+            click.echo(f"Workflows: {', '.join(workflows.keys())}")
+    except FileNotFoundError:
+        click.echo(f"Config file not found: {config_path}", err=True)
+        ctx.exit(2)
+    except Exception as e:
+        click.echo(f"Error reloading config: {e}", err=True)
+        ctx.exit(1)
+
+
+@config.command("alias")
+@click.argument("alias_name", type=str, required=False)
+@click.pass_context
+def cmd_alias(ctx: click.Context, alias_name: str | None) -> None:
+    """
+    Execute or list aliases from config.
+
+    Examples:
+        wt2 config alias deploy
+        wt2 config alias
+    """
+    config = ctx.obj.get("config", {})
+    aliases = config.get("aliases", {})
+
+    if not aliases:
+        click.echo("No aliases defined in config")
+        ctx.exit(3)
+        return
+
+    if alias_name:
+        alias_cmd = aliases.get(alias_name)
+        if not alias_cmd:
+            click.echo(f"Alias '{alias_name}' not found", err=True)
+            ctx.exit(3)
+            return
+
+        click.echo(f"Running alias '{alias_name}': {alias_cmd}")
+
+        # Parse and execute the alias command
+        import shlex
+        try:
+            args = shlex.split(alias_cmd)
+            # Remove 'wt2' prefix if present
+            if args and args[0] == "wt2":
+                args = args[1:]
+
+            # Create a new argument list for Click
+            original_argv = __import__("sys").argv
+            __import__("sys").argv = ["wt2"] + args
+
+            from ..cli import cli
+            cli(standalone_mode=False)
+
+            __import__("sys").argv = original_argv
+        except Exception as e:
+            click.echo(f"Failed to execute alias: {e}", err=True)
+            ctx.exit(4)
+    else:
+        click.echo("Available aliases:")
+        for name, cmd in aliases.items():
+            click.echo(f"  {name}: {cmd}")
+
+
+@config.group()
+def profile():
+    """Profile management commands."""
+    pass
+
+
+@profile.command("list")
+@click.pass_context
+def profile_list(ctx: click.Context) -> None:
+    """List all profiles in config."""
+    config = ctx.obj.get("config", {})
+    profiles = config.get("profiles", {})
+
+    if not profiles:
+        click.echo("No profiles defined in config")
+        return
+
+    click.echo("Profiles:")
+    for name in profiles:
+        click.echo(f"  - {name}")
+
+
+@profile.command("show")
+@click.argument("name", type=str, required=True)
+@click.pass_context
+def profile_show(ctx: click.Context, name: str) -> None:
+    """Show profile details."""
+    config = ctx.obj.get("config", {})
+    profiles = config.get("profiles", {})
+
+    if name not in profiles:
+        click.echo(f"Profile '{name}' not found", err=True)
+        ctx.exit(3)
+        return
+
+    import json
+    profile_data = profiles[name]
+    click.echo(json.dumps(profile_data, indent=2))
+
+
+@profile.command("apply")
+@click.argument("name", type=str, required=True)
+@click.pass_context
+def profile_apply(ctx: click.Context, name: str) -> None:
+    """Apply a profile from config."""
+    config = ctx.obj.get("config", {})
+    profiles = config.get("profiles", {})
+
+    if name not in profiles:
+        click.echo(f"Profile '{name}' not found", err=True)
+        ctx.exit(3)
+        return
+
+    profile_data = profiles[name]
+    ctx.obj["profile"] = profile_data
+    click.echo(f"Applied profile: {name}")
+
+    # Execute profile steps
+    from ..core.terminal import get_api
+    api = get_api()
+
+    for step in profile_data.get("steps", []):
+        if "command" in step:
+            api.send_text(step["command"] + "\r")
+            click.echo(f"  Running: {step['command']}")
+        elif "split" in step:
+            split_type = step["split"]
+            direction = "vertical" if split_type == "vertical" else "horizontal"
+            api.new_pane(direction=direction)
+            click.echo(f"  Split: {split_type}")
